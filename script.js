@@ -3,11 +3,13 @@ const { ipcRenderer } = require('electron');
 let selectedIndex = 0;
 let windowElements = [];
 
-// Simple function to get all open windows
+// --- Window Creation ---
 async function createAllWindows() {
   return await ipcRenderer.invoke('get-windows');
 }
 
+
+// --- On Page Loaded ---
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Window Manager loaded');
 
@@ -26,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', handleKeydown);
 });
 
+
+// --- Window Selection ---
 function handleKeydown(event) {
   switch(event.key) {
     case 'ArrowDown':
