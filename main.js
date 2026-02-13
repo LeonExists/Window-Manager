@@ -2,6 +2,8 @@ const { app, BrowserWindow, globalShortcut, ipcMain } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
+const fs = require('fs');
+const os = require('os');
 const execPromise = util.promisify(exec);
 
 // Enable live reload in development
@@ -60,42 +62,50 @@ async function getAllWindows() {
   try {
     // PowerShell script to get only Alt+Tab visible windows
     const psScript = `
-      Add-Type @"
-        using System;
-        using System.Runtime.InteropServices;
-        public class Win32 {
-          [DllImport("user32.dll")]
-          public static extern bool IsWindowVisible(IntPtr hWnd);
-          [DllImport("user32.dll")]
-          public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-          [DllImport("user32.dll")]
-          public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
-        }
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")]
+  public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+}
 "@
-      \$GWL_EXSTYLE = -20
-      \$WS_EX_TOOLWINDOW = 0x00000080
-      \$WS_EX_APPWINDOW = 0x00040000
-      \$GW_OWNER = 4
 
-      Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | ForEach-Object {
-        \$hwnd = \$_.MainWindowHandle
-        \$exStyle = [Win32]::GetWindowLong(\$hwnd, \$GWL_EXSTYLE)
-        \$owner = [Win32]::GetWindow(\$hwnd, \$GW_OWNER)
-        \$isVisible = [Win32]::IsWindowVisible(\$hwnd)
-        \$isToolWindow = (\$exStyle -band \$WS_EX_TOOLWINDOW) -ne 0
-        \$isAppWindow = (\$exStyle -band \$WS_EX_APPWINDOW) -ne 0
+$GWL_EXSTYLE = -20
+$WS_EX_TOOLWINDOW = 0x00000080
+$WS_EX_APPWINDOW = 0x00040000
+$GW_OWNER = 4
 
-        if (\$isVisible -and \$_.MainWindowTitle -ne '' -and ((\$owner -eq [IntPtr]::Zero -and -not \$isToolWindow) -or \$isAppWindow)) {
-          [PSCustomObject]@{
-            Id = \$_.Id
-            ProcessName = \$_.ProcessName
-            MainWindowTitle = \$_.MainWindowTitle
-          }
-        }
-      } | ConvertTo-Json
-    `;
+Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
+  $hwnd = $_.MainWindowHandle
+  $exStyle = [Win32]::GetWindowLong($hwnd, $GWL_EXSTYLE)
+  $owner = [Win32]::GetWindow($hwnd, $GW_OWNER)
+  $isVisible = [Win32]::IsWindowVisible($hwnd)
+  $isToolWindow = ($exStyle -band $WS_EX_TOOLWINDOW) -ne 0
+  $isAppWindow = ($exStyle -band $WS_EX_APPWINDOW) -ne 0
 
-    const { stdout } = await execPromise(`powershell -Command "${psScript.replace(/\n/g, ' ')}"`);
+  if ($isVisible -and $_.MainWindowTitle -ne '' -and (($owner -eq [IntPtr]::Zero -and -not $isToolWindow) -or $isAppWindow)) {
+    [PSCustomObject]@{
+      Id = $_.Id
+      ProcessName = $_.ProcessName
+      MainWindowTitle = $_.MainWindowTitle
+    }
+  }
+} | ConvertTo-Json
+`;
+
+    // Write script to temp file to avoid command line quote issues
+    const tempFile = path.join(os.tmpdir(), 'get-windows.ps1');
+    fs.writeFileSync(tempFile, psScript);
+
+    const { stdout } = await execPromise(`powershell -ExecutionPolicy Bypass -File "${tempFile}"`);
+
+    // Clean up temp file
+    fs.unlinkSync(tempFile);
 
     if (!stdout.trim()) {
       return [];
