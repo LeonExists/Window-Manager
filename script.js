@@ -5,24 +5,38 @@ let windowElements = [];
 
 // --- Window Creation ---
 async function createAllWindows() {
-  return await ipcRenderer.invoke('get-windows');
+  const windows = await ipcRenderer.invoke('get-windows');
+
+  // get the container
+  const container = document.querySelector('.windows');
+
+  // clear existing windows
+  container.innerHTML = '';
+
+  // create window elements
+  windows.forEach((window, index) => {
+    const windowEl = document.createElement('p');
+    windowEl.className = 'window';
+    windowEl.textContent = `${window.title} (${window.processName})`;
+    windowEl.dataset.windowId = window.id;
+    container.appendChild(windowEl);
+  });
+
+  // update the windowElements array
+  windowElements = Array.from(document.querySelectorAll('.window'));
+
+  // select first window by default
+  if (windowElements.length > 0) {
+    selectedIndex = 0;
+    updateSelection();
+  }
 }
 
 
 // --- On Page Loaded ---
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('Window Manager loaded');
-
-  // Get all window elements
-  windowElements = Array.from(document.querySelectorAll('.window'));
-
+document.addEventListener('DOMContentLoaded', async () => {
   // Create all windows
-  createAllWindows()
-
-  // Select the first window by default
-  if (windowElements.length > 0) {
-    updateSelection();
-  }
+  await createAllWindows();
 
   // Add keyboard event listener
   document.addEventListener('keydown', handleKeydown);
@@ -53,10 +67,8 @@ function handleKeydown(event) {
 }
 
 function updateSelection() {
-  // Remove selection from all windows
   windowElements.forEach(el => el.classList.remove('selected'));
 
-  // Add selection to current window
   if (windowElements[selectedIndex]) {
     windowElements[selectedIndex].classList.add('selected');
   }
