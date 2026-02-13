@@ -61,6 +61,11 @@ function toggleWindow() {
 async function getAllWindows() {
   try {
     // PowerShell script to get only Alt+Tab visible windows
+    // This matches Windows Alt+Tab behavior by filtering:
+    // 1. Must be visible
+    // 2. Must have a title
+    // 3. Must not be a tool window (unless it has WS_EX_APPWINDOW)
+    // 4. Must not have an owner (unless it has WS_EX_APPWINDOW)
     const psScript = `
 Add-Type @"
 using System;
@@ -72,6 +77,8 @@ public class Win32 {
   public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
   [DllImport("user32.dll")]
   public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetLastActivePopup(IntPtr hWnd);
 }
 "@
 
@@ -80,22 +87,37 @@ $WS_EX_TOOLWINDOW = 0x00000080
 $WS_EX_APPWINDOW = 0x00040000
 $GW_OWNER = 4
 
-Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
+$results = @()
+
+Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' } | ForEach-Object {
   $hwnd = $_.MainWindowHandle
+
+  # Get window properties
   $exStyle = [Win32]::GetWindowLong($hwnd, $GWL_EXSTYLE)
   $owner = [Win32]::GetWindow($hwnd, $GW_OWNER)
   $isVisible = [Win32]::IsWindowVisible($hwnd)
   $isToolWindow = ($exStyle -band $WS_EX_TOOLWINDOW) -ne 0
   $isAppWindow = ($exStyle -band $WS_EX_APPWINDOW) -ne 0
 
-  if ($isVisible -and $_.MainWindowTitle -ne '' -and (($owner -eq [IntPtr]::Zero -and -not $isToolWindow) -or $isAppWindow)) {
-    [PSCustomObject]@{
+  # Alt+Tab logic: Show if visible AND has title AND (no owner AND not tool window) OR has app window style
+  $showInAltTab = $isVisible -and (
+    ($owner -eq [IntPtr]::Zero -and -not $isToolWindow) -or $isAppWindow
+  )
+
+  if ($showInAltTab) {
+    $results += [PSCustomObject]@{
       Id = $_.Id
       ProcessName = $_.ProcessName
       MainWindowTitle = $_.MainWindowTitle
     }
   }
-} | ConvertTo-Json
+}
+
+if ($results.Count -gt 0) {
+  $results | ConvertTo-Json
+} else {
+  '[]'
+}
 `;
 
     // Write script to temp file to avoid command line quote issues
@@ -105,9 +127,13 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
     const { stdout } = await execPromise(`powershell -ExecutionPolicy Bypass -File "${tempFile}"`);
 
     // Clean up temp file
-    fs.unlinkSync(tempFile);
+    try {
+      fs.unlinkSync(tempFile);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
 
-    if (!stdout.trim()) {
+    if (!stdout.trim() || stdout.trim() === '[]') {
       return [];
     }
 
@@ -115,6 +141,8 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
 
     // Ensure it's always an array (single result might not be an array)
     const windowList = Array.isArray(windows) ? windows : [windows];
+
+    console.log(`Found ${windowList.length} Alt+Tab visible windows`);
 
     return windowList.map(win => ({
       id: win.Id,
