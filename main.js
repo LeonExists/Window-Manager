@@ -58,11 +58,10 @@ function toggleWindow() {
 // Function to get all open windows using PowerShell
 async function getAllWindows() {
   try {
-    const psScript = `
-      Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Select-Object Id, ProcessName, MainWindowTitle | ConvertTo-Json
-    `;
+    // Use single quotes in PowerShell to avoid quote escaping issues
+    const psScript = `Get-Process | Where-Object {\$_.MainWindowTitle -ne ''} | Select-Object Id, ProcessName, MainWindowTitle | ConvertTo-Json`;
 
-    const { stdout } = await execPromise(`powershell -Command "${psScript.replace(/\n/g, ' ')}"`);
+    const { stdout } = await execPromise(`powershell -Command "${psScript}"`);
     const windows = JSON.parse(stdout);
 
     // Ensure it's always an array (single result might not be an array)
